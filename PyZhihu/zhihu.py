@@ -1,13 +1,19 @@
 # coding = utf-8
-import requests
-import json
 import base64
-from PyQt5.QtWidgets import *
+import hmac
+import json
+import sys
+import time
+from hashlib import sha1
+
+import bs4
+import execjs
+import requests
 from PyQt5.QtCore import *
 from PyQt5.QtGui import *
-import itchat
-import sys
-from login import Ui_dlg_login
+from PyQt5.QtWidgets import *
+
+from PyZhihu.login import Ui_dlg_login
 
 
 class ZhihuCaptcha(QThread):
@@ -80,7 +86,73 @@ class ZhihuCaptcha(QThread):
             else:
                 print("校验码通过")
                 # 开始登录
-                return 'captcha ok'
+                timestamp = str(int(time.time() * 1000))
+                signature = self.get_signature(timestamp)
+                encrypt = self.get_encrypt(username, password, timestamp, signature, captcha_code)
+                print(encrypt)
+                data = encrypt
+                login_headers = {
+                    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/12.0.1 Safari/605.1.15',
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'x-zse-83': '3_1.1'}
+                url_login = 'https://www.zhihu.com/api/v3/oauth/sign_in'
+                res_login = self.session.post(url_login, data=data, headers=login_headers)
+                print(res_login.status_code, res_login.content.decode())
+                if 200 <= res_login.status_code < 300:
+                    print('登录成功！')
+                    # 爬取主页内容
+                    url_home = 'https://www.zhihu.com'
+                    res_home = self.session.post(url_home)
+                    content_home = res_home.content.decode('utf-8')
+                    # 解析
+                    bs_content = bs4.BeautifulSoup(content_home, 'html.parser')
+                    list_topics = bs_content.find_all('div', attrs={
+                        "class": "ContentItem AnswerItem",
+                    })
+                    print()
+                    print(len(list_topics))
+                    if len(list_topics) > 0:
+                        # 第一条
+                        topic = list_topics[0].get('data-zop')
+                        json_topic = json.loads(topic)
+                        print(json_topic['title'])
+                    return json_topic['title']
+
+    # 签名函数
+    def get_signature(self, now_):
+        # 签名由clientId,grantType,source,timestamp四个参数生成
+        h = hmac.new(
+            key='d1b964811afb40118a12068ff74a12f4'.encode('utf-8'),
+            digestmod=sha1)
+        grant_type = 'password'
+        client_id = 'c3cef7c66a1843f8b3a9e6a1e3160e20'
+        source = 'com.zhihu.web'
+        now = now_
+        h.update((grant_type + client_id + source + now).encode('utf-8'))
+        return h.hexdigest()
+
+    # 提交信息加密函数
+    def get_encrypt(self, username, password, timestamp, signature, captcha):
+        str_login = ""
+        str_login += "client_id=c3cef7c66a1843f8b3a9e6a1e3160e20&"
+        str_login += "grant_type=password&"
+        str_login += F"timestamp={timestamp}&"
+        str_login += "source=com.zhihu.web"
+        str_login += F"&signature={signature}&"
+        str_login += F"username={username}&"
+        str_login += F"password={password}&"
+        str_login += F"captcha={captcha}&"
+        str_login += "lang=en&"
+        str_login += "ref_source=homepage&"
+        str_login += "utm_source="
+
+        with open('p05_custom_atob.js', 'r') as fd:
+            js_zhihu = fd.read()
+
+        ctx = execjs.compile(js_zhihu)
+        encrypt_ = ctx.call('Q', str_login)
+        return encrypt_
+
 
 
 # 二维码窗体
@@ -95,6 +167,9 @@ class LoginDialog(QDialog):
         self.setGeometry(100, 100, 400, 300)
         self.setWindowTitle('用户登录')
         self.ui.setupUi(self)
+
+        self.ui.edt_username.setText('你的电话')
+        self.ui.edt_password.setText('密码')
 
         # 处理信号
         self.th.sign_need_captcha.connect(self.query_captcha)
@@ -130,10 +205,4 @@ app = QApplication(sys.argv)
 ui_login = LoginDialog()
 
 sys.exit(app.exec())
-
-
-
-
-
-
 
