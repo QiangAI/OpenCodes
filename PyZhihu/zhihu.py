@@ -154,8 +154,7 @@ class ZhihuCaptcha(QThread):
         return encrypt_
 
 
-
-# 二维码窗体
+# 校验码窗体
 class LoginDialog(QDialog):
 
     # 初始化窗体
